@@ -48,7 +48,7 @@ interface IBondDepository {
         external
         returns (
             uint256 payout_,
-            uint256 expiry_,
+            uint256 epochCount_, 
             uint256 index_
         );
     

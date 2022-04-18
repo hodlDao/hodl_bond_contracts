@@ -53,7 +53,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
                 quoteToken: _quoteToken,
                 sold: 0,
                 purchased: 0,
-                enableQuote2WBTC: false,
+                enableQuote2WBTC: true,
                 isActive: _isActive
             })
         );
@@ -79,7 +79,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
     function enableMarketAnd2BTC(uint256 _id, bool _enableMarket, bool _enableBTC, address _swapHelper, address _wbtc) 
         external override onlyGovernorPolicy 
     {
-        require(metadata[_id].quoteDecimals > 0, "NoMarket");
+        require(address(markets[_id].quoteToken) != address(0), "NoMarket");
         markets[_id].isActive = _enableMarket;
         markets[_id].enableQuote2WBTC = _enableBTC;
         swapHelper = _swapHelper;
@@ -89,7 +89,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
     function updateBondInfo(uint256 _id, uint256 _baseVariable, uint256 _controlVariable) 
         external onlyGovernorPolicy 
     {
-        require(metadata[_id].quoteDecimals > 0, "NoMarket");
+        require(address(markets[_id].quoteToken) != address(0), "NoMarket");
         terms[_id].baseVariable = _baseVariable;
         terms[_id].controlVariable = _controlVariable;
     }
@@ -97,33 +97,25 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
     function updateCalculator(uint256 _id, address _bondCalculator) 
         external override onlyGovernorPolicy 
     {
-        require(metadata[_id].quoteDecimals > 0, "NoMarket");
+        require(address(markets[_id].quoteToken) != address(0), "NoMarket");
         metadata[_id].bondCalculator = _bondCalculator;
     }
     
     function rebase(uint256 curEpoch) 
         external override onlyStakingContract
     {
-        updateGenesisAmounts(curEpoch);
-        updateBondingAmounts(curEpoch);
-    }
-    
-    function updateGenesisAmounts(uint256 curEpoch) 
-        internal
-    {
-        if(genesisLastEpochNumber == curEpoch)
+        if(bondingEpochNumber == curEpoch)
             return;
             
-        if(genesisLastEpochNumber == 0) {
-            genesisLastEpochNumber = curEpoch;
+        if(bondingEpochNumber == 0) {
+            bondingEpochNumber = curEpoch;
             genesisEpochNumber = curEpoch;
-            (, uint256 curEpochEndTime) = staking.epochNumber();
-            genesisEpochEndTime = curEpochEndTime;
+            bondingIndex = 0;
             epochLength = staking.epochLength();
             return;
         }
         
-        require(genesisLastEpochNumber+1 == curEpoch, "EpochMismatch");
+        require(bondingEpochNumber+1 == curEpoch, "EpochMismatch");
         
         if(!genesisUpdatingEnded && totalGenesis[INDEX_GENESIS_0] > 0) {
             uint256 amountPerEpoch;
@@ -133,22 +125,21 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
             //For INDEX_GENESIS_1
             amountPerEpoch = genesisPayout - genesisPayout / 10;
             amountPerEpoch = amountPerEpoch.mul(epochLength).div(genesisLength);
-            if(genesisLastEpochNumber >= genesisEpochNumber+genesisLength.div(epochLength)) {
+            if(bondingEpochNumber >= genesisEpochNumber+genesisLength.div(epochLength)) {
                 amountPerEpoch = 0;
                 genesisUpdatingEnded = true;
             }
                 
             if(amountPerEpoch > 0) {
-                deltaGons = sBTCH.gonsForBalancePerEpoch(amountPerEpoch, genesisLastEpochNumber, genesisLastEpochNumber);
+                deltaGons = sBTCH.gonsForBalancePerEpoch(amountPerEpoch, bondingEpochNumber);
                 totalGenesis[INDEX_GENESIS_1] += deltaGons;
                 payout += sBTCH.balanceForGons(deltaGons);
             }
             
             //For INDEX_GENESIS_BOND
-            (uint256 firstEpoch, uint256 lastEpoch,) = getEpochRange(genesisBondCreated, genesisBondCreated+genesisBondLength, block.timestamp);
-            if(genesisLastEpochNumber <= lastEpoch) {
-                amountPerEpoch = genesisBondPayout.div(lastEpoch-firstEpoch+1);
-                deltaGons = sBTCH.gonsForBalancePerEpoch(amountPerEpoch, genesisLastEpochNumber, genesisLastEpochNumber);
+            if(bondingEpochNumber < genesisEpochNumber+genesisBondLength.div(epochLength)) {
+                amountPerEpoch = genesisBondPayout.mul(epochLength).div(genesisBondLength);
+                deltaGons = sBTCH.gonsForBalancePerEpoch(amountPerEpoch, bondingEpochNumber);
                 totalGenesis[INDEX_GENESIS_BOND] += deltaGons;
                 payout += sBTCH.balanceForGons(deltaGons);
             }
@@ -159,40 +150,20 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
             }
         }
         
-        genesisLastEpochNumber = curEpoch;
-    }
-    
-    function updateBondingAmounts(uint256 curEpoch) 
-        internal
-    {
-        if(bondingEpochNumber == curEpoch)
-            return;
-            
-        if(bondingEpochNumber == 0) {
-            bondingEpochNumber = curEpoch;
-            bondingIndex = 0;
-            return;
-        }
-        
-        require(bondingEpochNumber+1 == curEpoch, "EpochMismatch");
-        
         bondingAmounts[bondingIndex] = 0;
         bondingIndex = (bondingIndex+1) % 21;
+        
         bondingEpochNumber = curEpoch;
     }
     
     //should be used after rebase.
-    function adjustBondingAmounts(uint256 bondValueAmount, uint256 bondLength) 
+    function adjustBondingAmounts(uint256 bondValueAmount, uint256 epochCount) 
         internal 
     {
-        (uint256 firstEpoch, uint256 lastEpoch,) = getEpochRange(block.timestamp, block.timestamp+bondLength, block.timestamp+bondLength);
-        require(firstEpoch == bondingEpochNumber, "Mismatch1");
+        require(epochCount <= 21, "Mismatch2");
         
-        uint epochNum = lastEpoch.sub(firstEpoch).add(1);
-        require(epochNum <= 21, "Mismatch2");
-        
-        uint bondValueAmountPerEpoch = bondValueAmount.div(epochNum);
-        for(uint256 i=0; i<epochNum; i++) {
+        uint bondValueAmountPerEpoch = (epochCount == 0) ? 0 : bondValueAmount.div(epochCount);
+        for(uint256 i=0; i<epochCount; i++) {
             bondingAmounts[(bondingIndex+i)%21] += bondValueAmountPerEpoch;
         }
     }
@@ -210,7 +181,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
     //deposit quote tokens to bond from a specified market
     //Here _maxPrice is based on BTCH/USDC.
     function deposit(uint256 _id, uint256 _amount, uint256 _maxPrice, address _user, address _referral)
-        external override returns (uint256 payout_, uint256 expiry_, uint256 index_)
+        external override returns (uint256 payout_, uint256 epochCount_, uint256 index_)
     {
         Market storage market = markets[_id];
         Terms storage term = terms[_id];
@@ -228,9 +199,8 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
 
         emit Bond(_id, _amount, price);
 
-        expiry_ = block.timestamp + term.vestingTerm;
-        index_ = addNoteForBond(_user, payout_, uint48(expiry_), uint48(_id), _referral);
-        adjustBondingAmounts(bondValueAmount, term.vestingTerm);
+        (index_, epochCount_) = addNoteForBond(_user, payout_, term.vestingTerm, uint48(_id), _referral);
+        adjustBondingAmounts(bondValueAmount, epochCount_);
         
         if(market.enableQuote2WBTC && address(market.quoteToken) != wbtc) {
             IERC20(market.quoteToken).safeTransferFrom(msg.sender, swapHelper, _amount);
@@ -253,7 +223,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         external override onlyGenesisReward
     {
         require(_id == 0 && _amount > 0 && genesisPayout == 0, "NoCondition");
-        require(metadata[_id].quoteDecimals > 0, "NoMarket");
+        require(address(markets[_id].quoteToken) != address(0), "NoMarket");
         Market storage market = markets[_id];
         
         staking.rebase();
@@ -262,6 +232,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         (uint256 genesisAmount, uint256 bondAmount, uint256 priceGenesis, uint256 priceBond) = IGenesis(genesis).getGenesisInfo();
         genesisAmount = genesisAmount.sub(bondAmount);
         
+        genesisEpochNumber = bondingEpochNumber;
         market.purchased += _amount;
         
         //INDEX_GENESIS_0 + INDEX_GENESIS_1
@@ -275,7 +246,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         (genesisBondPayout, genesisAmount) = payoutWithPrice(_id, bondAmount, priceBond);
         market.sold += genesisBondPayout;
         addNoteForGenesis(genesisBondPayout, _bondLength, _referral, INDEX_GENESIS_BOND);
-        adjustBondingAmounts(genesisAmount, _bondLength);
+        adjustBondingAmounts(genesisAmount, _bondLength/epochLength);
 
         // transfer payment to treasury
         market.quoteToken.safeTransferFrom(msg.sender, address(treasury), _amount);
@@ -290,9 +261,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         addNoteForRebalance(adjustType, stakingReward, invokerReward, invoker, _referral);
     }
     
-    //1e19 = BTCH decimals (9)
-    //_bondValueAmount = USDC decimals (6)
-    //payout price = USDC decimals (6)
+    //1e9 = BTCH decimals (9)
     function payoutFor(uint256 _id, uint256 _amount) 
         public view override returns (uint256 _payout, uint256 _payoutPrice, uint256 _bondValueAmount) 
     {

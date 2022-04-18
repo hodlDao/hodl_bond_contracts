@@ -38,8 +38,8 @@ contract Rebalancer is HodlAccessControlled {
     
     uint256 public liquidityRate = 9900; //1e4
     uint256 public rewardPortionLevel = 10000;
-    uint256 public rewardPortionUpwards = 500;
-    uint256 public rewardPortionDownwards = 500;
+    uint256 public rewardPortionUpwards = 100;
+    uint256 public rewardPortionDownwards = 100;
     uint256 public rewardPortionInvokerLevel = 10000;
     uint256 public rewardPortionInvokerUpwards = 500;
     uint256 public rewardPortionInvokerDownwards = 500;
@@ -48,8 +48,8 @@ contract Rebalancer is HodlAccessControlled {
     uint256 public priceGapAdjustPeriod = 3600*8;
     uint256 public priceGapAdjustLatest = 0;
     
-    uint256 public priceGapFloor = 9800;
-    uint256 public priceGapCeiling = 10200;
+    uint256 public priceGapFloor = 9700;
+    uint256 public priceGapCeiling = 10300;
     uint256 public priceGapLevel = 10000;
     
     uint256 public usdc2wbtcPriceAllowed = 8000; //1e4 decimals.
@@ -117,7 +117,7 @@ contract Rebalancer is HodlAccessControlled {
     
     function setPriceGapParameters(uint256 _priceGapFloor, uint256 _priceGapCeiling) public onlyGovernorPolicy 
     {
-        require(_priceGapFloor >= 10100 && _priceGapFloor <= 9900, "NotAllowedRange");
+        require(_priceGapCeiling >= 10100 && _priceGapFloor <= 9900, "NotAllowedRange");
         priceGapFloor = _priceGapFloor;
         priceGapCeiling = _priceGapCeiling;
     }

@@ -18,7 +18,7 @@ contract HodlAuthority is IHodlAuthority, HodlAccessControlled {
     
     uint256 public override genesisMarketID = 0;
     
-    uint256 public override stakingReward = 2500;// % reward for staking reward (4 decimals: 100 = 1%)
+    uint256 public override stakingReward = 1000;// % reward for staking reward (4 decimals: 100 = 1%)
     uint256 public override genReward = 3000;    // % reward for genesis based on staking reward (4 decimals: 100 = 1%)
     uint256 public override devReward = 1500;    // % reward for dev based on staking reward (4 decimals: 100 = 1%)
     uint256 public override refReward = 0;       // % reward for referrer based on staking reward (4 decimals: 100 = 1%)
@@ -26,7 +26,7 @@ contract HodlAuthority is IHodlAuthority, HodlAccessControlled {
     uint256 public override genesisLength = 3600*24*180; //180 days
     uint256 public override bondLength = 3600*24*7;      //7 days
     
-    uint256 public override unstakeClaimMax = 1000000e9;
+    uint256 public override unstakeClaimMax = 100000e9;
     
     
     enum UINTTYPE {

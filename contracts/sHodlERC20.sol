@@ -211,31 +211,22 @@ contract sHodlERC20Token is IsBTCH, ERC20Permit {
         return gons.div(_gonsPerFragment);
     }
     
-    function gonsForBalancePerEpoch(uint256 amountPerEpoch, uint256 fromEpoch, uint256 toEpoch) public view override returns (uint256) 
+    function gonsForBalancePerEpoch(uint256 amountPerEpoch, uint256 fromEpoch) public view override returns (uint256) 
     {
         //Note: rebases[i].index indicates the index for rebases[i].epoch+1 actually.
-        if(rebases.length == 0 || fromEpoch >= rebases[0].epoch + rebases.length || toEpoch < fromEpoch)
+        if(rebases.length == 0 || fromEpoch >= rebases[0].epoch + rebases.length)
             return 0;
             
         require(fromEpoch >= rebases[0].epoch, "InvalidEpoch");
-        if(toEpoch >= rebases[0].epoch + rebases.length)
-            toEpoch = rebases[0].epoch + rebases.length - 1;
 
         uint retGons;
         uint startIndex;
-        uint rangeLength;
-        if(fromEpoch == rebases[0].epoch) {
+        if(fromEpoch == rebases[0].epoch)
             startIndex = 0;
-            rangeLength = toEpoch - fromEpoch;
-            retGons += amountPerEpoch.mul(INDEX.div(rebases[0].index));
-        }
-        else {
+        else
             startIndex = fromEpoch - rebases[0].epoch - 1;
-            rangeLength = toEpoch - fromEpoch + 1;
-        }
-        for(uint i=0; i< rangeLength; i++) {
-            retGons += amountPerEpoch.mul(INDEX.div(rebases[startIndex+i].index));
-        }
+            
+        retGons = amountPerEpoch.mul(INDEX.div(rebases[startIndex].index));
         
         return retGons;
     }

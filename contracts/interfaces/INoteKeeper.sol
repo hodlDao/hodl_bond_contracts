@@ -12,9 +12,11 @@ interface INoteKeeper {
         uint256 payout;  //  sBTCH gons for bond.
         uint256 payoutRemain; //  sBTCH gons remain for bond.
         uint48 created;  //  timestamp market was created.
-        uint48 matured;  //  timestamp when market is matured and expired.
         uint48 redeemed; //  timestamp market was redeemed.
         uint48 marketID; //  market ID of deposit. uint48 to avoid adding a slot.
+        uint256 createdEpoch;
+        uint256 redeemedEpoch;
+        uint256 epochCount;
     }
 
     function updateParameters(
@@ -26,10 +28,10 @@ interface INoteKeeper {
         bool _triggerPriceUpdate
     ) external;
     
-    function redeem(address _user, uint256[] memory _indexes) external returns (uint256);
-    function redeemAll(address _user) external returns (uint256);
+    function redeem(address _user, uint256[] memory _indexes, bool withBTCH) external returns (uint256);
+    function redeemAll(address _user, bool withBTCH) external returns (uint256);
     
-    function redeemGenesis() external returns (uint256 payout_);
+    function redeemGenesis(bool withBTCH) external returns (uint256 payout_);
 
     function indexesFor(address _user) external view returns (uint256[] memory);
     function pendingFor(address _user, uint256 _index) external view returns (uint256 payout_);

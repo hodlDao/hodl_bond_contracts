@@ -8,7 +8,7 @@ interface IsBTCH is IERC20 {
     function circulatingSupply() external view returns (uint256);
     function gonsForBalance(uint256 amount) external view returns (uint256);
     function balanceForGons(uint256 gons) external view returns (uint256);
-    function gonsForBalancePerEpoch(uint256 amountPerEpoch, uint256 fromEpoch, uint256 toEpoch) external view returns (uint256);
+    function gonsForBalancePerEpoch(uint256 amountPerEpoch, uint256 fromEpoch) external view returns (uint256);
     function index0() external view returns (uint256);
     function index() external view returns (uint256);
 }

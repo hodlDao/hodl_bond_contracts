@@ -18,7 +18,7 @@ contract Distributor is IDistributor, HodlAccessControlled {
     address public immutable sbtch;
     address public immutable staking;
     uint256 public immutable rateDenominator = 1_000_000;
-    uint256 public infoRate = 1000; // in 1_000_000: ( 1000 = 0.1% )
+    uint256 public infoRate = 400; // in 1_000_000: ( 1000 = 0.1% )
 
     constructor(
         address _sbtch,

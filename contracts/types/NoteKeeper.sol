@@ -22,7 +22,7 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
     uint public constant INDEX_GENESIS_BOND = 2;
     uint public constant INDEX_GENESIS_REWARD = 3;
     
-    bool public triggerPriceUpdate;
+    bool public triggerPriceUpdate = true;
     bool public genesisUpdatingEnded;
     
     uint public genesisPayout;
@@ -30,12 +30,8 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
     
     uint public epochLength;
     uint public genesisEpochNumber;
-    uint public genesisEpochEndTime;
     uint public genesisLength;
     uint public genesisBondLength;
-    
-    uint public genesisBondCreated;
-    uint public genesisLastEpochNumber;
     
     uint[21] public bondingAmounts;     // used as ring for bonding amounts with 21 Epochs for bondValueAmount as USDC.
     uint     public bondingIndex;       // index to ring.
@@ -94,20 +90,22 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
     }
 
     //adds a new Note for user bonding.
-    function addNoteForBond(address _user, uint256 _payout, uint48 _expiry, uint48 _marketID, address _referral) 
-        internal returns (uint256 index_) 
+    function addNoteForBond(address _user, uint256 _payout, uint256 _vestingLength, uint48 _marketID, address _referral) 
+        internal returns (uint256 index_, uint256 epochCount_) 
     {
-        require(genesisPayout > 0, "NoGenesis");
-        
         index_ = notes[_user].length;
+        
+        epochCount_ = _vestingLength/epochLength;
         notes[_user].push(
             Note({
                 payout: sBTCH.gonsForBalance(_payout),
                 payoutRemain: sBTCH.gonsForBalance(_payout),
                 created: uint48(block.timestamp),
-                matured: _expiry,
                 redeemed: 0,
-                marketID: _marketID
+                marketID: _marketID,
+                createdEpoch: bondingEpochNumber,
+                redeemedEpoch: 0,
+                epochCount: epochCount_
             })
         );
         
@@ -125,8 +123,6 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
     function addNoteForGenesis(uint256 _payout, uint256 _vestingLength, address _referral, uint256 _type) 
         internal 
     {
-        require(_type <= INDEX_GENESIS_BOND, "InvalidType");
-        
         (uint256 toGen, uint256 toStaking, uint256 toDev, uint256 toRef) = _giveRewards(_payout, _referral);
         if(_type == INDEX_GENESIS_0) {
             totalGenesis[_type] += sBTCH.gonsForBalance(_payout);
@@ -141,7 +137,6 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
             toDev = 0;
         }
         else if(_type == INDEX_GENESIS_BOND) {
-            genesisBondCreated = block.timestamp;
             genesisBondLength = _vestingLength;
         }
         
@@ -164,8 +159,6 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
     function addNoteForRebalance(uint256 adjustType, uint256 _payoutToStaking, uint256 _payoutToInvoker, address _invoker, address _referral)
         internal 
     {
-        require(genesisPayout > 0, "NoGenesis");
-        
         (uint256 toGen, uint256 toStaking, uint256 toDev, uint256 toRef) = _giveRewardsForStakingReward(_payoutToStaking, _referral);
 
         totalGenesis[INDEX_GENESIS_REWARD] += sBTCH.gonsForBalance(toGen);
@@ -190,7 +183,7 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
             staking.stake(authority.guardian(), toDev);
     }
 
-    function redeem(address _user, uint256[] memory _indexes) 
+    function redeem(address _user, uint256[] memory _indexes, bool withBTCH) 
         public override returns (uint256 payout_) 
     {
         staking.rebase();
@@ -202,23 +195,27 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
             if (pay > 0) {
                 notes[_user][_indexes[i]].payoutRemain -= pay;
                 notes[_user][_indexes[i]].redeemed = time;
+                notes[_user][_indexes[i]].redeemedEpoch = bondingEpochNumber;
                 payout_ += pay;
             }
         }
         
         payout_ = sBTCH.balanceForGons(payout_);
-        staking.unstake(_user, payout_);
+        if(withBTCH)
+            staking.unstake(_user, payout_);
+        else
+            IERC20(address(sBTCH)).safeTransfer(_user, payout_);
     }
 
     //redeem all redeemable markets for user
-    function redeemAll(address _user)
+    function redeemAll(address _user, bool withBTCH)
         external override returns (uint256) 
     {
-        return redeem(_user, indexesFor(_user));
+        return redeem(_user, indexesFor(_user), withBTCH);
     }
     
     //redeem genesis notes by genesis participants.
-    function redeemGenesis() 
+    function redeemGenesis(bool withBTCH) 
         external override returns (uint256 payout_)
     {
         staking.rebase();
@@ -228,7 +225,7 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
         require(userGenesisAmount > 0, "NoGenesis");
         
         if(userGenesisClaimedEpoch[user] == 0) {
-            userGenesisClaimedEpoch[user] = genesisLastEpochNumber;
+            userGenesisClaimedEpoch[user] = bondingEpochNumber;
             for(uint i=0; i<4; i++)
                 userGenesisClaimedAmount[user].push(0);
         }
@@ -246,7 +243,10 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
         
         if(payout_ > 0) {
             payout_ = sBTCH.balanceForGons(payout_);
-            staking.unstake(user, payout_);
+            if(withBTCH)
+                staking.unstake(user, payout_);
+            else
+                IERC20(address(sBTCH)).safeTransfer(user, payout_);
         }
     }
     
@@ -300,30 +300,28 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
         public view override returns (uint256 payout_) 
     {
         Note memory note = notes[_user][_index];
-        if(note.payoutRemain == 0 || note.matured == note.created) {
+        if(note.payoutRemain == 0 || note.epochCount == 0) {
             payout_ = note.payoutRemain;
             return payout_;
         }
         
-        (uint256 firstEpoch, uint256 lastEpoch, uint256 nextEpoch) = getEpochRange(note.created, note.matured, note.redeemed);
-        (uint256 curEpoch,) = staking.epochNumber();
+        uint256 nextEpoch = (note.redeemedEpoch == 0) ? note.createdEpoch : note.redeemedEpoch;
+        uint256 lastEpoch = note.createdEpoch + note.epochCount - 1;
         
-        if(curEpoch > lastEpoch) {
+        if(bondingEpochNumber > lastEpoch) {
             payout_ = note.payoutRemain;
             return payout_;
         }
         
-        if(nextEpoch >= curEpoch) {
+        if(nextEpoch >= bondingEpochNumber) {
             payout_ = 0;
             return payout_;
         }
         
-        payout_ = note.payout.mul(curEpoch.sub(nextEpoch));
-        payout_ = payout_.div(lastEpoch.sub(firstEpoch).add(1));
+        payout_ = note.payout.mul(bondingEpochNumber.sub(nextEpoch)).div(note.epochCount);
+        
         if(payout_ > note.payoutRemain)
             payout_ = note.payoutRemain;
-            
-        return payout_;
     }
     
     function userGenesisAmountInfo(address user) 
@@ -340,15 +338,5 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
             userBondAmount = userGenesisAmount * bondRate / bondRateLevel;
             userGenesisAmount = userGenesisAmount - userBondAmount;
         }
-    }
-    
-    function getEpochRange(uint256 created, uint256 expiry, uint256 redeemed) 
-        public view returns (uint256 firstEpoch, uint256 lastEpoch, uint256 nextEpoch) 
-    {
-        firstEpoch = (created < genesisEpochEndTime) ? genesisEpochNumber : genesisEpochNumber + 1 + created.sub(genesisEpochEndTime).div(epochLength);
-        lastEpoch = (expiry < genesisEpochEndTime) ? genesisEpochNumber : genesisEpochNumber + expiry.sub(genesisEpochEndTime).div(epochLength);
-        if(lastEpoch < firstEpoch)
-            lastEpoch = firstEpoch;
-        nextEpoch = (redeemed < genesisEpochEndTime) ? firstEpoch : genesisEpochNumber + 1 + redeemed.sub(genesisEpochEndTime).div(epochLength);
     }
 }
