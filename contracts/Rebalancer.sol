@@ -180,6 +180,8 @@ contract Rebalancer is HodlAccessControlled {
         
         //Check amountOutMin with BTCUSDC24 for allowance.
         amountWBTC = IPriceHelper(priceHelper).getBTCUSDC24();
+        require(amountWBTC > 0, "NoPrice");
+        
         amountWBTC = amountIn.mul(1e8).div(amountWBTC).mul(quote2wbtcPriceAllowed).div(1e4);
         require(amountWBTC <= amountOutMin, "amountOutMinTooLow");
         
