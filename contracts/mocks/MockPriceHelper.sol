@@ -66,19 +66,19 @@ contract MockPriceHelper {
     
     function getBTCUSDC365() public view returns(uint256)
     {
-        require(btcusdc365 > 0, "NoPrice");
+        //require(btcusdc365 > 0, "NoPrice");
         return btcusdc365;
     }
     
     function getBTCUSDC24() public view returns(uint256)
     {
-        require(btcusdc24 > 0, "NoPrice");
+        //require(btcusdc24 > 0, "NoPrice");
         return btcusdc24;
     }
     
     function getBTCHBTC24() public view returns(uint256)
     {
-        require(btchbtc24 > 0, "NoPrice");
+        //require(btchbtc24 > 0, "NoPrice");
         return btchbtc24;
     }
     
