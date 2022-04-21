@@ -11,6 +11,7 @@ import "./interfaces/IERC20Metadata.sol";
 import "./interfaces/IBondDepository.sol";
 import "./interfaces/IBondCalculator.sol";
 import "./interfaces/ISwapHelper.sol";
+import "./interfaces/IRebalancer.sol";
 
 contract HodlBondDepository is IBondDepository, NoteKeeper {
     using SafeERC20 for IERC20;
@@ -18,6 +19,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
 
     event CreateMarket(uint256 indexed id, address indexed baseToken, address indexed quoteToken, uint256 controlVariable);
     event Bond(uint256 indexed id, uint256 amount, uint256 price);
+    event BondInfoUpdated(uint256 indexed id, uint256 baseVariable, uint256 controlVariable);
 
     Market[] public markets;    // persistent market data
     Terms[] public terms;       // deposit construction data
@@ -35,8 +37,8 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         IGenesis _genesis, 
         IPriceHelper _priceHelper
     ) NoteKeeper(_authority, _btch, _sBTCH, _staking, _treasury, _genesis, _priceHelper) {
-        _btch.approve(address(_staking), 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
-        IERC20(address(_sBTCH)).approve(address(_staking), 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
+        _btch.approve(address(_staking), type(uint256).max);
+        IERC20(address(_sBTCH)).approve(address(_staking), type(uint256).max);
     }
     
     //creates a new market type
@@ -90,8 +92,11 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         external onlyGovernorPolicy 
     {
         require(address(markets[_id].quoteToken) != address(0), "NoMarket");
+        require(_baseVariable <= 1e4 && _baseVariable >= 1000, "InvalidRange1");
+        require(_controlVariable <= 10000e4 && _controlVariable >= 1000, "InvalidRange2");
         terms[_id].baseVariable = _baseVariable;
         terms[_id].controlVariable = _controlVariable;
+        emit BondInfoUpdated(_id, _baseVariable, _controlVariable);
     }
     
     function updateCalculator(uint256 _id, address _bondCalculator) 
@@ -151,7 +156,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         }
         
         bondingAmounts[bondingIndex] = 0;
-        bondingIndex = (bondingIndex+1) % 21;
+        bondingIndex = (bondingIndex+1) % EPOCH_SIZE;
         
         bondingEpochNumber = curEpoch;
     }
@@ -160,11 +165,11 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
     function adjustBondingAmounts(uint256 bondValueAmount, uint256 epochCount) 
         internal 
     {
-        require(epochCount <= 21, "Mismatch2");
+        require(epochCount <= EPOCH_SIZE, "Mismatch2");
         
         uint bondValueAmountPerEpoch = (epochCount == 0) ? 0 : bondValueAmount.div(epochCount);
         for(uint256 i=0; i<epochCount; i++) {
-            bondingAmounts[(bondingIndex+i)%21] += bondValueAmountPerEpoch;
+            bondingAmounts[(bondingIndex+i)%EPOCH_SIZE] += bondValueAmountPerEpoch;
         }
     }
 
@@ -174,7 +179,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
     {
         curBondingAmount = bondValueAmount;
 
-        for(uint256 slot = 0; slot < 21; slot++) 
+        for(uint256 slot = 0; slot < EPOCH_SIZE; slot++) 
             curBondingAmount += bondingAmounts[slot];
     }
     
@@ -203,9 +208,12 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         adjustBondingAmounts(bondValueAmount, epochCount_);
         
         if(market.enableQuote2WBTC && address(market.quoteToken) != wbtc) {
+            //Use oracle to check amount min allowed.
+            //reuse bondValueAmount for amountMinAllowed.
+            bondValueAmount = IRebalancer(rebalancer).getAllowedAmountOutMin2WBTC(address(market.quoteToken), _amount);
             IERC20(market.quoteToken).safeTransferFrom(msg.sender, swapHelper, _amount);
             uint oldWBTC = IERC20(wbtc).balanceOf(address(this));
-            ISwapHelper(swapHelper).swapExactTokensForTokens(address(market.quoteToken), wbtc, _amount, 1);
+            ISwapHelper(swapHelper).swapExactTokensForTokens(address(market.quoteToken), wbtc, _amount, bondValueAmount);
             _amount = IERC20(wbtc).balanceOf(address(this));
             require(_amount > oldWBTC, "NoAmount");
             IERC20(wbtc).safeTransfer(address(treasury), _amount);
@@ -329,16 +337,17 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         public view override returns (uint256[] memory) 
     {
         uint256 num;
-        for (uint256 i = 0; i < markets.length; i++) {
+        uint256 marketsLength = markets.length;
+        for (uint256 i = 0; i < marketsLength; i++) {
             if (isLive(i)) num++;
         }
 
         uint256[] memory ids = new uint256[](num);
-        uint256 nonce;
-        for (uint256 i = 0; i < markets.length; i++) {
+        num = 0;
+        for (uint256 i = 0; i < marketsLength; i++) {
             if (isLive(i)) {
-                ids[nonce] = i;
-                nonce++;
+                ids[num] = i;
+                num++;
             }
         }
         return ids;

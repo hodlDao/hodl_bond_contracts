@@ -18,17 +18,14 @@ import "./interfaces/IBondDepository.sol";
 import "./interfaces/IPriceHelper.sol";
 
 import "./interfaces/ISwapHelper.sol";
-import "./interfaces/I20.sol";
+import "./interfaces/IERC20Metadata.sol";
 
 contract RebalancerHelper {
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
     
-    uint256 public SQRTBN = 1e20;
-    uint256 public SQRTBN2 = 1e40;
-    
-    constructor() {
-    }
+    uint256 public constant SQRTBN = 1e20;
+    uint256 public constant SQRTBN2 = 1e40;
      
     //Requirement: priceBA2 > priceBA
     //Formula: priceBA2 = SQRTBN*reserveA/reserveB = SQRTBN*getPrice()/(10**decimalB)
@@ -38,7 +35,7 @@ contract RebalancerHelper {
     //997/1000*x2 + 1997/1000*x +1 >= priceBA2/priceBA
     //A*x2 + B*x - C >= 0
     //(x + B/2A)2 >= C/A + (B/2A)2
-    function getAmountInForAdjust(uint reserveA, uint reserveB, uint priceBA2) public view returns (uint amountA) {
+    function getAmountInForAdjust(uint reserveA, uint reserveB, uint priceBA2) public pure returns (uint amountA) {
         uint priceBA = SQRTBN.mul(reserveA).div(reserveB);
         uint A = SQRTBN.mul(997).div(1000);
         uint B = SQRTBN.mul(1997).div(1000);
@@ -100,8 +97,14 @@ contract RebalancerHelper {
     }
     
     function getPrice(address factory, address tokenA, address tokenB) public view returns (uint priceAB) {
-        uint256 decimalA = I20(tokenA).decimals();
+        uint256 decimalA = IERC20Metadata(tokenA).decimals();
         priceAB = getLiquidityAmount(factory, tokenA, tokenB, 10**decimalA);
+    }
+    
+    function getFairReserveB(uint256 reserveA, uint256 reserveB, uint256 decimalsA, uint256 oraclePriceAB) public pure returns (uint fairReserveB) {
+        uint256 sqrtK = Math.sqrt(reserveA.mul(reserveB));
+        uint256 fairP = oraclePriceAB.mul(SQRTBN2).div(decimalsA);
+        fairReserveB = sqrtK.mul(Math.sqrt(fairP)).div(SQRTBN);
     }
  
 }

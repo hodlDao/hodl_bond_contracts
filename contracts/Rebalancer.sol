@@ -20,7 +20,6 @@ import "./interfaces/IPriceHelper.sol";
 import "./interfaces/IRebalancerHelper.sol";
 
 import "./interfaces/ISwapHelper.sol";
-import "./interfaces/I20.sol";
 
 contract Rebalancer is HodlAccessControlled {
     using SafeERC20 for IERC20;
@@ -33,8 +32,8 @@ contract Rebalancer is HodlAccessControlled {
         _;
     }
     
-    uint256 public SQRTBN = 1e20;
-    uint256 public SQRTBN2 = 1e40;
+    uint256 public constant SQRTBN = 1e20;
+    uint256 public constant SQRTBN2 = 1e40;
     
     uint256 public liquidityRate = 9900; //1e4
     uint256 public rewardPortionLevel = 10000;
@@ -52,14 +51,15 @@ contract Rebalancer is HodlAccessControlled {
     uint256 public priceGapCeiling = 10300;
     uint256 public priceGapLevel = 10000;
     
-    uint256 public usdc2wbtcPriceAllowed = 8000; //1e4 decimals.
+    uint256 public quote2wbtcPriceAllowed = 8000; //1e4 = decimals (4).
+    uint256 public btch2wbtcPriceRangeAllowed = 2000; //1e4 = decimals (4).
     
     address[] public workersArray;
     mapping(address => uint) public workers;
     
-    address public usdc;
-    address public btch;
-    address public wbtc;
+    address public immutable usdc;
+    address public immutable btch;
+    address public immutable wbtc;
     
     address public swapHelper;
     
@@ -75,6 +75,7 @@ contract Rebalancer is HodlAccessControlled {
     address public rebalancerHelper;
     
     constructor(IHodlAuthority _authority, address pUSDC, address pBTCH, address pWBTC) HodlAccessControlled(_authority) {
+        require(pUSDC != address(0) && pBTCH != address(0) && pWBTC != address(0), "ZeroAddress");
         usdc = pUSDC;
         btch = pBTCH;
         wbtc = pWBTC;
@@ -108,9 +109,14 @@ contract Rebalancer is HodlAccessControlled {
     
     function setRewardParameters(uint256 _liquidityRate, uint256 _rewardPortionUpwards, uint256 _rewardPortionDownwards, uint256 _rewardPortionInvokerUpwards, uint256 _rewardPortionInvokerDownwards) public onlyGovernorPolicy 
     {
+        require(_liquidityRate <= 10000, "InvalidLiquidityRate");
         liquidityRate = _liquidityRate;
+        
+        require(_rewardPortionUpwards <= 5000 && _rewardPortionDownwards <= 5000, "InvalidRewardPortion");
         rewardPortionUpwards = _rewardPortionUpwards;
         rewardPortionDownwards = _rewardPortionDownwards;
+        
+        require(_rewardPortionInvokerUpwards <= 5000 && _rewardPortionInvokerDownwards <= 5000, "InvalidRewardPortionInvoker");
         rewardPortionInvokerUpwards = _rewardPortionInvokerUpwards;
         rewardPortionInvokerDownwards = _rewardPortionInvokerDownwards;
     }
@@ -122,15 +128,16 @@ contract Rebalancer is HodlAccessControlled {
         priceGapCeiling = _priceGapCeiling;
     }
     
-    function setRebalancerParameters(uint256 _usdc2wbtcPriceAllowed, uint256 _priceGapAdjustLatest, uint256 _priceGapAdjustPeriod) public onlyGovernorPolicy 
+    function setRebalancerParameters(uint256 _quote2wbtcPriceAllowed, uint256 _btch2wbtcPriceRangeAllowed, uint256 _priceGapAdjustLatest, uint256 _priceGapAdjustPeriod) public onlyGovernorPolicy 
     {
-        require(_usdc2wbtcPriceAllowed >= 8000 && _priceGapAdjustPeriod >= 3600, "NotAllowedRange");
+        require(_quote2wbtcPriceAllowed >= 8000 && _btch2wbtcPriceRangeAllowed <= 2000 && _priceGapAdjustPeriod >= 3600, "NotAllowedRange");
         
         priceGapAdjustLatest = _priceGapAdjustLatest;
         if(priceGapAdjustLatest < block.timestamp)
             priceGapAdjustLatest = block.timestamp;
             
-        usdc2wbtcPriceAllowed = _usdc2wbtcPriceAllowed;
+        quote2wbtcPriceAllowed = _quote2wbtcPriceAllowed;
+        btch2wbtcPriceRangeAllowed = _btch2wbtcPriceRangeAllowed;
         priceGapAdjustPeriod = _priceGapAdjustPeriod;
     }
     
@@ -144,10 +151,11 @@ contract Rebalancer is HodlAccessControlled {
         if(priceGapAdjustLatest > 0) 
             priceGapAdjustEnabled = true;
 
-        IERC20(btch).safeApprove(bondDepository, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
-        IERC20(btch).safeApprove(btch2wbtcR, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
-        IERC20(wbtc).safeApprove(btch2wbtcR, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
-        IERC20(lpAddr).safeApprove(btch2wbtcR, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
+        uint256 maxValue = type(uint256).max;
+        IERC20(btch).safeApprove(bondDepository, maxValue);
+        IERC20(btch).safeApprove(btch2wbtcR, maxValue);
+        IERC20(wbtc).safeApprove(btch2wbtcR, maxValue);
+        IERC20(lpAddr).safeApprove(btch2wbtcR, maxValue);
     }
     
     function disableLiquidityAction() public onlyGovernorPolicy 
@@ -170,10 +178,9 @@ contract Rebalancer is HodlAccessControlled {
     {
         require(amountIn > 0, "NoAmountIn");
         
-        //reuse amountWBTC to check amoutOutMin.
-        uint256 decimalWBTC = I20(wbtc).decimals();
+        //Check amountOutMin with BTCUSDC24 for allowance.
         amountWBTC = IPriceHelper(priceHelper).getBTCUSDC24();
-        amountWBTC = amountIn.mul(10**decimalWBTC).div(amountWBTC).mul(usdc2wbtcPriceAllowed).div(1e4);
+        amountWBTC = amountIn.mul(1e8).div(amountWBTC).mul(quote2wbtcPriceAllowed).div(1e4);
         require(amountWBTC <= amountOutMin, "amountOutMinTooLow");
         
         amountWBTC = swapUSDC2WBTC(amountIn, amountOutMin);
@@ -186,7 +193,6 @@ contract Rebalancer is HodlAccessControlled {
     {
         require(amountIn > 0, "NoAmountIn");
         
-        amountWBTC = amountIn;
         ITreasury(treasury).withdraw(amountIn, wbtc);
         amountWBTC = IERC20(wbtc).balanceOf(address(this));
         
@@ -226,45 +232,37 @@ contract Rebalancer is HodlAccessControlled {
     }
     
     function checkRebalanceCondition() public view returns (uint256 adjustType, uint256 btch2wbtcDelta, uint256 btch2wbtc) {
-        uint256 decimalWBTC = I20(wbtc).decimals();
-        uint256 decimalUSDC = I20(usdc).decimals();
         uint targetPrice = IPriceHelper(priceHelper).getBTCUSDC365()/10000;
-        uint marketPrice = IPriceHelper(priceHelper).getBTCHBTC24().mul(IPriceHelper(priceHelper).getBTCUSDC24()).div(10**decimalWBTC);
+        uint btcusdc24 = IPriceHelper(priceHelper).getBTCUSDC24();
+        uint marketPrice = IPriceHelper(priceHelper).getBTCHBTC24().mul(btcusdc24).div(1e8);
+        require(targetPrice > 0 && marketPrice > 0, "NoPrice");
 
-        uint wbtc2usdc = IRebalancerHelper(rebalancerHelper).getPrice(wbtc2usdcF, wbtc, usdc);
+        //Spot price is based on BTCUSDC24.
         btch2wbtc = IRebalancerHelper(rebalancerHelper).getPrice(btch2wbtcF, btch, wbtc);
-        uint usdc2wbtc = IRebalancerHelper(rebalancerHelper).getPrice(wbtc2usdcF, usdc, wbtc);
-        uint btch2usdc;
+        uint usdcbtc24 = uint256(1e14).div(btcusdc24);
+        uint btch2usdc = btch2wbtc.mul(btcusdc24).div(1e8);
         
         adjustType = 0;
-        uint256 priceHit = priceGapLevel * marketPrice / targetPrice;
+        uint256 priceHit = priceGapLevel.mul(marketPrice).div(targetPrice);
+        uint256 priceHitCur = priceGapLevel.mul(btch2usdc).div(targetPrice);
         
-        //upwards: marketPrice/targetPrice < priceGapFloor/priceGapLevel
-        if(priceHit < priceGapFloor) {
+        //Check current price with market price and target price for conditions.
+        if(priceHit < priceGapFloor && priceHitCur < priceGapFloor) {
             //upwards
-            btch2usdc = btch2wbtc.mul(wbtc2usdc).div(10**decimalWBTC);
-            priceHit = priceGapLevel.mul(btch2usdc).div(targetPrice);
-            if(priceHit < priceGapFloor) {
-                adjustType = 1;
-                btch2wbtcDelta = targetPrice.sub(btch2usdc);
-                btch2wbtcDelta = btch2wbtcDelta.mul(usdc2wbtc).div(10**decimalUSDC);
-            }
+            adjustType = 1;
+            btch2wbtcDelta = targetPrice.sub(btch2usdc);
+            btch2wbtcDelta = btch2wbtcDelta.mul(usdcbtc24).div(1e6);
         }
-        else if(priceHit > priceGapCeiling) {
+        else if(priceHit > priceGapCeiling && priceHitCur > priceGapCeiling) {
             //downwards
-            btch2usdc = btch2wbtc.mul(wbtc2usdc).div(10**decimalWBTC);
-            priceHit = priceGapLevel.mul(btch2usdc).div(targetPrice);
-            if(priceHit > priceGapCeiling) {
-                adjustType = 2;
-                btch2wbtcDelta = btch2usdc.sub(targetPrice);
-                btch2wbtcDelta = btch2wbtcDelta.mul(usdc2wbtc).div(10**decimalUSDC);
-            }
+            adjustType = 2;
+            btch2wbtcDelta = btch2usdc.sub(targetPrice);
+            btch2wbtcDelta = btch2wbtcDelta.mul(usdcbtc24).div(1e6);
         }
     }
     
     function getWBTC2USDCValue() public view returns (uint256 amount) {
         address lpAddr = IUniswapV2Factory(btch2wbtcF).getPair(btch, wbtc);
-        uint256 decimalWBTC = I20(wbtc).decimals();
         uint256 liquidity = IERC20(lpAddr).balanceOf(treasury);
         require(liquidity > 0, "Wrong");
         
@@ -272,9 +270,27 @@ contract Rebalancer is HodlAccessControlled {
         (uint reserveWBTC, uint reserveBTCH,) = IUniswapV2Pair(lpAddr).getReserves();
         if(wbtc > btch)
             (reserveWBTC, reserveBTCH) = (reserveBTCH, reserveWBTC);
-        amount = reserveWBTC.mul(liquidity).div(totalSupply);
+            
+        uint targetPrice = IPriceHelper(priceHelper).getBTCUSDC365()/10000;
+        uint BTCUSDC24 = IPriceHelper(priceHelper).getBTCUSDC24();
+        require(targetPrice > 0 && BTCUSDC24 > 0, "NoPrice");
         
-        amount = IPriceHelper(priceHelper).getBTCUSDC().mul(amount).div(10**decimalWBTC);
+        //Improve with fair prices and reserves based on BTCHBTC24.
+        uint256 oraclePrice = IPriceHelper(priceHelper).getBTCHBTC24();
+        if(oraclePrice == 0)
+            oraclePrice = targetPrice.mul(1e8).div(BTCUSDC24);
+
+        reserveWBTC = IRebalancerHelper(rebalancerHelper).getFairReserveB(reserveBTCH, reserveWBTC, 1e9, oraclePrice);
+        
+        amount = reserveWBTC.mul(liquidity).div(totalSupply);
+        amount = BTCUSDC24.mul(amount).div(1e8);
+    }
+    
+    function getAllowedAmountOutMin2WBTC(address quoteToken, uint256 amountIn) public view returns (uint256 amountOutMin) {
+        require(amountIn > 0 && quoteToken == usdc, "NotAllowed");
+        
+        uint BTCUSDC24 = IPriceHelper(priceHelper).getBTCUSDC24();
+        amountOutMin = amountIn.mul(1e8).div(BTCUSDC24).mul(quote2wbtcPriceAllowed).div(1e4);
     }
     
     function upwardsAdjustBTCH2WBTC(uint256 btch2wbtcDelta, uint256 btch2wbtc) internal returns (uint256 btchDelta) {
@@ -325,7 +341,7 @@ contract Rebalancer is HodlAccessControlled {
             (reserveWBTC, reserveBTCH) = (reserveBTCH, reserveWBTC);
         
         //Reuse amountBTCH as priceBA2 for priceWBTC2BTCH.
-        amountBTCH = 1e17; //9 decimals + 8 decimals.
+        amountBTCH = 1e17; //BTCH decimals (9) + BTCH decimals (8).
         amountBTCH = amountBTCH.div(btch2wbtc.sub(btch2wbtcDelta)).mul(SQRTBN).div(1e8);
         amountBTCH = IRebalancerHelper(rebalancerHelper).getAmountInForAdjust(reserveBTCH, reserveWBTC, amountBTCH);
         
@@ -395,23 +411,32 @@ contract Rebalancer is HodlAccessControlled {
     
     function provideWBTC2Liquidity(uint256 amountWBTC) internal returns (uint256 amountBTCH) 
     {
-        uint256 decimalWBTC = I20(wbtc).decimals();
-        
         address lpAddr = IUniswapV2Factory(btch2wbtcF).getPair(btch, wbtc);
         uint256 liquidity = (lpAddr != address(0)) ? IUniswapV2Pair(lpAddr).totalSupply() : 0;
+        uint targetPrice = IPriceHelper(priceHelper).getBTCUSDC365()/10000;
+        uint BTCUSDC24 = IPriceHelper(priceHelper).getBTCUSDC24();
+        require(targetPrice > 0 && BTCUSDC24 > 0, "NoPrice");
         
         if(liquidity == 0) {
-            
-            uint wbtc2usdc = IRebalancerHelper(rebalancerHelper).getPrice(wbtc2usdcF, wbtc, usdc);
-            uint targetPrice = IPriceHelper(priceHelper).getBTCUSDC365()/10000;
-            
-            amountBTCH = amountWBTC.mul(wbtc2usdc).mul(1e9).div(10**decimalWBTC).div(targetPrice);
+            //Use target price and market price to add liquidity.
+            amountBTCH = amountWBTC.mul(BTCUSDC24).mul(1e9).div(1e8).div(targetPrice);
             ITreasury(treasury).mint(address(this), amountBTCH);
             
             (amountBTCH, amountWBTC, liquidity) = depositBTCH2WBTC(amountBTCH, amountWBTC);
             IERC20(lpAddr).safeTransfer(treasury, liquidity);
         }
         else {
+            //Check price range allowance based on oraclePrice from BTCHBTC24.
+            uint oraclePrice = IPriceHelper(priceHelper).getBTCHBTC24();
+            if(oraclePrice == 0) {
+                oraclePrice = targetPrice.mul(1e8).div(BTCUSDC24);
+            }
+            
+            uint btch2wbtc = IRebalancerHelper(rebalancerHelper).getPrice(btch2wbtcF, btch, wbtc);
+            require(btch2wbtc >= oraclePrice.mul(uint(1e4).sub(btch2wbtcPriceRangeAllowed)).div(1e4) 
+                && btch2wbtc <= oraclePrice.mul(uint(1e4).add(btch2wbtcPriceRangeAllowed)).div(1e4),
+                "PriceRangeWrong");
+        
             (uint reserveWBTC, uint reserveBTCH,) = IUniswapV2Pair(lpAddr).getReserves();
             if(wbtc > btch)
                 (reserveWBTC, reserveBTCH) = (reserveBTCH, reserveWBTC);
@@ -449,8 +474,8 @@ contract Rebalancer is HodlAccessControlled {
             btch, 
             wbtc,
             liquidity,
-            0,
-            0,
+            1,
+            1,
             address(this),
             block.timestamp
             );

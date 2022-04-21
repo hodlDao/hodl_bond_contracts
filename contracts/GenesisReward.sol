@@ -16,9 +16,9 @@ contract GenesisReward is HodlAccessControlled {
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
     
-    address public targetToken;
-    address public genesis;
-    address public bondDepository;
+    address public immutable targetToken;
+    address public immutable genesis;
+    address public immutable bondDepository;
     
     constructor(IHodlAuthority _authority, address pTargetToken, address pGenesis, address pBondDepository) HodlAccessControlled(_authority) {
         targetToken = pTargetToken;

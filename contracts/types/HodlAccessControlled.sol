@@ -6,11 +6,12 @@ import "../interfaces/IHodlAuthority.sol";
 abstract contract HodlAccessControlled {
     event AuthorityUpdated(IHodlAuthority indexed authority);
     
-    string UNAUTHORIZED = "UNAUTHORIZED";
+    string private UNAUTHORIZED = "UNAUTHORIZED";
 
     IHodlAuthority public authority;
 
     constructor(IHodlAuthority _authority) {
+        require(address(_authority) != address(0), "ZeroAddress");
         authority = _authority;
         emit AuthorityUpdated(_authority);
     }
@@ -36,6 +37,7 @@ abstract contract HodlAccessControlled {
     }
 
     function setAuthority(IHodlAuthority _newAuthority) external onlyGovernor {
+        require(address(_newAuthority) != address(0), "ZeroAddress");
         authority = _newAuthority;
         emit AuthorityUpdated(_newAuthority);
     }

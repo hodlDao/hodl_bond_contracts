@@ -14,10 +14,12 @@ import "./types/HodlAccessControlled.sol";
 contract Distributor is IDistributor, HodlAccessControlled {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
+    
+    event InfoRateSet(uint256 infoRate);
 
     address public immutable sbtch;
     address public immutable staking;
-    uint256 public immutable rateDenominator = 1_000_000;
+    uint256 public constant rateDenominator = 1_000_000;
     uint256 public infoRate = 400; // in 1_000_000: ( 1000 = 0.1% )
 
     constructor(
@@ -38,6 +40,8 @@ contract Distributor is IDistributor, HodlAccessControlled {
     function setInfoRate(uint256 _infoRate) external override onlyGovernorPolicy {
         require(_infoRate <= 1_000_000, "Too much");
         infoRate = _infoRate;
+        
+        emit InfoRateSet(_infoRate);
     }
 
 }

@@ -47,7 +47,7 @@ contract sHodlERC20Token is IsBTCH, ERC20Permit {
     uint256 private constant TOTAL_GONS = MAX_UINT256 - (MAX_UINT256 % INITIAL_FRAGMENTS_SUPPLY);
 
     // MAX_SUPPLY = maximum integer < (sqrt(4*TOTAL_GONS + 1) - 1) / 2
-    uint256 private constant MAX_SUPPLY = ~uint128(0); // (2^128) - 1
+    uint256 private constant MAX_SUPPLY = type(uint128).max; // (2^128) - 1
 
     uint256 private _gonsPerFragment;
     mapping(address => uint256) private _gonBalances;
@@ -94,9 +94,6 @@ contract sHodlERC20Token is IsBTCH, ERC20Permit {
         uint256 rebaseAmount;
         uint256 circulatingSupply_ = circulatingSupply();
         if (profit_ == 0) {
-            emit LogSupply(epoch_, _totalSupply);
-            emit LogRebase(epoch_, 0, index());
-            
             //Need to store each rebase even no profit.
             _storeRebase(circulatingSupply_, profit_, epoch_);
             return _totalSupply;

@@ -122,7 +122,7 @@ contract HodlTreasury is HodlAccessControlled, ITreasury {
     //enable permission from queue
     function enable(STATUS _status, address _address) external onlyGovernorPolicy 
     {
-        require(timelockEnabled == false, "UseTimelock");
+        require(!timelockEnabled, "UseTimelock");
         if (_status == STATUS.SBTCH) {
             sBTCH = IsBTCH(_address);
         }
@@ -156,7 +156,8 @@ contract HodlTreasury is HodlAccessControlled, ITreasury {
     function indexInRegistry(address _address, STATUS _status) public view returns (bool, uint256) 
     {
         address[] memory entries = registry[_status];
-        for (uint256 i = 0; i < entries.length; i++) {
+        uint256 entriesLength = entries.length;
+        for (uint256 i = 0; i < entriesLength; i++) {
             if (_address == entries[i]) {
                 return (true, i);
             }
@@ -192,7 +193,7 @@ contract HodlTreasury is HodlAccessControlled, ITreasury {
     //queue address to receive permission
     function queueTimelock(STATUS _status, address _address) external onlyGovernor 
     {
-        require(_address != address(0));
+        require(_address != address(0), "NoTargetAddress");
         require(timelockEnabled == true, "TimelockDisabled");
 
         uint256 timelock = block.timestamp.add(periodNeededForQueue.mul(3)); // 3-day timelock

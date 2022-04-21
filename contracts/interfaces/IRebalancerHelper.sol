@@ -8,4 +8,5 @@ interface IRebalancerHelper {
     function getLiquidityFromMintFee(address factory, address tokenA, address tokenB) external view returns (uint liquidity);
     function getLiquidityAmount(address factory, address tokenA, address tokenB, uint256 amountA) external view returns (uint amountB);
     function getPrice(address factory, address tokenA, address tokenB) external view returns (uint priceAB);
+    function getFairReserveB(uint256 reserveA, uint256 reserveB, uint256 decimalsA, uint256 oraclePriceAB) external view returns (uint fairReserveB);
 }

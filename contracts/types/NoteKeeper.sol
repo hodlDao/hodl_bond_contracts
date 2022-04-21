@@ -22,6 +22,8 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
     uint public constant INDEX_GENESIS_BOND = 2;
     uint public constant INDEX_GENESIS_REWARD = 3;
     
+    uint public constant EPOCH_SIZE = 21;
+    
     bool public triggerPriceUpdate = true;
     bool public genesisUpdatingEnded;
     
@@ -33,7 +35,7 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
     uint public genesisLength;
     uint public genesisBondLength;
     
-    uint[21] public bondingAmounts;     // used as ring for bonding amounts with 21 Epochs for bondValueAmount as USDC.
+    uint[EPOCH_SIZE] public bondingAmounts;     // used as ring for bonding amounts with 21 Epochs for bondValueAmount as USDC.
     uint     public bondingIndex;       // index to ring.
     uint     public bondingEpochNumber; // first Epoch with index.
     
@@ -71,6 +73,8 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
     constructor(IHodlAuthority _authority, IERC20 _btch, IsBTCH _sBTCH, IStaking _staking, ITreasury _treasury, IGenesis _genesis, IPriceHelper _priceHelper) 
         FrontEndRewarder(_authority, _btch) 
     {
+        require(address(_sBTCH) != address(0), "ZeroAddress");
+        require(address(_staking) != address(0), "ZeroAddress");
         sBTCH = _sBTCH;
         staking = _staking;
         treasury = _treasury;
@@ -159,6 +163,7 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
     function addNoteForRebalance(uint256 adjustType, uint256 _payoutToStaking, uint256 _payoutToInvoker, address _invoker, address _referral)
         internal 
     {
+        require(adjustType == 1 || adjustType == 2 , "InvalidAdjustType");
         (uint256 toGen, uint256 toStaking, uint256 toDev, uint256 toRef) = _giveRewardsForStakingReward(_payoutToStaking, _referral);
 
         totalGenesis[INDEX_GENESIS_REWARD] += sBTCH.gonsForBalance(toGen);
@@ -189,7 +194,8 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
         staking.rebase();
         
         uint48 time = uint48(block.timestamp);
-        for (uint256 i = 0; i < _indexes.length; i++) {
+        uint256 indexLength = _indexes.length;
+        for (uint256 i = 0; i < indexLength; i++) {
             uint256 pay = pendingFor(_user, _indexes[i]);
 
             if (pay > 0) {
@@ -278,17 +284,17 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
         Note[] memory info = notes[_user];
 
         uint256 length;
-        for (uint256 i = 0; i < info.length; i++) {
+        uint256 infoLength = info.length;
+        for (uint256 i = 0; i < infoLength; i++) {
             if (info[i].payoutRemain > 0) length++;
         }
 
         uint256[] memory indexes = new uint256[](length);
-        uint256 position;
-
-        for (uint256 i = 0; i < info.length; i++) {
+        length = 0;
+        for (uint256 i = 0; i < infoLength; i++) {
             if (info[i].payoutRemain > 0) {
-                indexes[position] = i;
-                position++;
+                indexes[length] = i;
+                length++;
             }
         }
 

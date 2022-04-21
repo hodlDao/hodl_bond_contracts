@@ -14,6 +14,7 @@ abstract contract FrontEndRewarder is HodlAccessControlled {
     IERC20 internal immutable btch; // reward token
 
     constructor(IHodlAuthority _authority, IERC20 _btch) HodlAccessControlled(_authority) {
+        require(address(_btch) != address(0), "ZeroAddress");
         btch = _btch;
     }
 
@@ -39,18 +40,15 @@ abstract contract FrontEndRewarder is HodlAccessControlled {
         toStaking = _toStaking;
         toGen = (_toStaking * authority.genReward()) / 1e4;
         toDev = (_toStaking * authority.devReward()) / 1e4;
-        toRef = (_toStaking * authority.refReward()) / 1e4;
 
         if (whitelisted[_referral]) {
+            toRef = (_toStaking * authority.refReward()) / 1e4;
             rewards[_referral] += toRef;
-        }
-        else {
-            toRef = 0;
         }
     }
 
-    function whitelist(address _operator) external onlyGovernorPolicy 
+    function whitelist(address _operator, bool _isWhitelisted) external onlyGovernorPolicy 
     {
-        whitelisted[_operator] = !whitelisted[_operator];
+        whitelisted[_operator] = _isWhitelisted;
     }
 }

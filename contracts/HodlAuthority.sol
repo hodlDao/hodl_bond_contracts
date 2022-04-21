@@ -16,12 +16,12 @@ contract HodlAuthority is IHodlAuthority, HodlAccessControlled {
     address public newPolicy;
     address public newVault;
     
-    uint256 public override genesisMarketID = 0;
+    uint256 public constant override genesisMarketID = 0;
     
     uint256 public override stakingReward = 1000;// % reward for staking reward (4 decimals: 100 = 1%)
     uint256 public override genReward = 3000;    // % reward for genesis based on staking reward (4 decimals: 100 = 1%)
     uint256 public override devReward = 1500;    // % reward for dev based on staking reward (4 decimals: 100 = 1%)
-    uint256 public override refReward = 0;       // % reward for referrer based on staking reward (4 decimals: 100 = 1%)
+    uint256 public override refReward;           // % reward for referrer based on staking reward (4 decimals: 100 = 1%)
 
     uint256 public override genesisLength = 3600*24*180; //180 days
     uint256 public override bondLength = 3600*24*7;      //7 days
@@ -45,6 +45,7 @@ contract HodlAuthority is IHodlAuthority, HodlAccessControlled {
         address _policy,
         address _vault
     ) HodlAccessControlled(IHodlAuthority(address(this))) {
+        require(_governor != address(0), "ZeroAddress");
         governor = _governor;
         emit GovernorPushed(address(0), governor, true);
         guardian = _guardian;
@@ -56,7 +57,11 @@ contract HodlAuthority is IHodlAuthority, HodlAccessControlled {
     }
 
     function pushGovernor(address _newGovernor, bool _effectiveImmediately) external onlyGovernor {
-        if (_effectiveImmediately) governor = _newGovernor;
+        if (_effectiveImmediately) {
+            //Only check for Governor.
+            require(_newGovernor != address(0), "ZeroAddress");
+            governor = _newGovernor;
+        }
         newGovernor = _newGovernor;
         emit GovernorPushed(governor, newGovernor, _effectiveImmediately);
     }
@@ -109,22 +114,25 @@ contract HodlAuthority is IHodlAuthority, HodlAccessControlled {
         onlyGovernor 
     {
         UINTTYPE paramType = UINTTYPE(_paramType);
-        require(paramType >= UINTTYPE.STAKINGREWARD && paramType <= UINTTYPE.UNSTAKECLAIMMAX, "OutOfRange");
         
         if(paramType == UINTTYPE.STAKINGREWARD) 
         {
+            require(paramValue <= 1e4, "InvalidValue1");
             stakingReward = paramValue;
         }
         else if(paramType == UINTTYPE.GENREWARD) 
         {
+            require(paramValue <= 1e4, "InvalidValue2");
             genReward = paramValue;
         }
         else if(paramType == UINTTYPE.DEVREWARD) 
         {
+            require(paramValue <= 1e4, "InvalidValue3");
             devReward = paramValue;
         }
         else if(paramType == UINTTYPE.REFREWARD) 
         {
+            require(paramValue <= 1e4, "InvalidValue4");
             refReward = paramValue;
         }
         else if(paramType == UINTTYPE.GENESISLENGTH) 
