@@ -174,8 +174,8 @@ contract Rebalancer is HodlAccessControlled {
         IERC20(lpAddr).safeApprove(btch2wbtcR, 0);
     }
     
-    //Used only by authorized worker to convert treasury USDC to liquidity.
-    function treasury2Liquidity(uint256 amountIn, uint256 amountOutMin) public onlyWorker returns (uint256 amountWBTC, uint256 amountBTCH) 
+    //Used only by authorized worker to convert treasury USDC to WBTC.
+    function treasury2WBTC(uint256 amountIn, uint256 amountOutMin) public onlyWorker returns (uint256 amountWBTC) 
     {
         require(amountIn > 0, "NoAmountIn");
         
@@ -189,18 +189,36 @@ contract Rebalancer is HodlAccessControlled {
         
         amountWBTC = swapUSDC2WBTC(amountIn, amountOutMin);
         
-        amountBTCH = provideWBTC2Liquidity(amountWBTC);
+        IERC20(wbtc).safeTransfer(treasury, amountWBTC);
+    }
+    
+    //Used only by authorized worker to convert treasury USDC to liquidity.
+    function treasury2Liquidity(uint256 amountIn, uint256 amountOutMin, uint256 btch2wbtcDeltaRange) public onlyWorker returns (uint256 amountWBTC, uint256 amountBTCH) 
+    {
+        require(amountIn > 0, "NoAmountIn");
+        
+        //Check amountOutMin with BTCUSDC24 for allowance.
+        amountWBTC = IPriceHelper(priceHelper).getBTCUSDC24();
+        require(amountWBTC > 0, "NoPrice");
+        
+        //Double security check for mis-input amountOutMin.
+        amountWBTC = amountIn.mul(1e8).div(amountWBTC).mul(quote2wbtcPriceAllowed).div(1e4);
+        require(amountWBTC <= amountOutMin, "amountOutMinTooLow");
+        
+        amountWBTC = swapUSDC2WBTC(amountIn, amountOutMin);
+        
+        amountBTCH = provideWBTC2Liquidity(amountWBTC, btch2wbtcDeltaRange);
     }
     
     //Used only by authorized worker to convert treasury WBTC to liquidity.
-    function treasuryWBTC2Liquidity(uint256 amountIn) public onlyWorker returns (uint256 amountWBTC, uint256 amountBTCH) 
+    function treasuryWBTC2Liquidity(uint256 amountIn, uint256 btch2wbtcDeltaRange) public onlyWorker returns (uint256 amountWBTC, uint256 amountBTCH) 
     {
         require(amountIn > 0, "NoAmountIn");
         
         ITreasury(treasury).withdraw(amountIn, wbtc);
         amountWBTC = IERC20(wbtc).balanceOf(address(this));
         
-        amountBTCH = provideWBTC2Liquidity(amountWBTC);
+        amountBTCH = provideWBTC2Liquidity(amountWBTC, btch2wbtcDeltaRange);
     }
     
     function rebalance() public 
@@ -413,7 +431,7 @@ contract Rebalancer is HodlAccessControlled {
         require(amountOut >= amountOutMin, "PriceFailure2");
     }
     
-    function provideWBTC2Liquidity(uint256 amountWBTC) internal returns (uint256 amountBTCH) 
+    function provideWBTC2Liquidity(uint256 amountWBTC, uint256 btch2wbtcDeltaRange) internal returns (uint256 amountBTCH) 
     {
         address lpAddr = IUniswapV2Factory(btch2wbtcF).getPair(btch, wbtc);
         uint256 liquidity = (lpAddr != address(0)) ? IUniswapV2Pair(lpAddr).totalSupply() : 0;
@@ -437,9 +455,11 @@ contract Rebalancer is HodlAccessControlled {
             }
             
             uint btch2wbtc = IRebalancerHelper(rebalancerHelper).getPrice(btch2wbtcF, btch, wbtc);
-            require(btch2wbtc >= oraclePrice.mul(uint(1e4).sub(btch2wbtcPriceRangeAllowed)).div(1e4) 
-                && btch2wbtc <= oraclePrice.mul(uint(1e4).add(btch2wbtcPriceRangeAllowed)).div(1e4),
-                "PriceRangeWrong");
+            
+            require(btch2wbtcDeltaRange <= btch2wbtcPriceRangeAllowed, "PriceRangeWrong1");
+            require(btch2wbtc >= oraclePrice.mul(uint(1e4).sub(btch2wbtcDeltaRange)).div(1e4) 
+                && btch2wbtc <= oraclePrice.mul(uint(1e4).add(btch2wbtcDeltaRange)).div(1e4),
+                "PriceRangeWrong2");
         
             (uint reserveWBTC, uint reserveBTCH,) = IUniswapV2Pair(lpAddr).getReserves();
             if(wbtc > btch)
