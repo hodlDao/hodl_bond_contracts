@@ -266,9 +266,8 @@ contract Rebalancer is HodlAccessControlled {
     }
     
     function getWBTCAmount2USDCValue(uint256 amountBTC) public view returns (uint256 amount) {
-        uint targetPrice = IPriceHelper(priceHelper).getBTCUSDC365()/10000;
         uint BTCUSDC24 = IPriceHelper(priceHelper).getBTCUSDC24();
-        require(targetPrice > 0 && BTCUSDC24 > 0, "NoPrice");
+        require(BTCUSDC24 > 0, "NoPrice");
         
         amount = BTCUSDC24.mul(amountBTC).div(1e8);
     }
