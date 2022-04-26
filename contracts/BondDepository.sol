@@ -176,7 +176,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
     
     //deposit quote token to bond from a specified market
     //Here _maxPrice is based on BTCH/USDC.
-    function deposit(uint256 _id, uint256 _amount, uint256 _maxPrice, address _user, address _referral)
+    function deposit(uint256 _id, uint256 _amount, uint256 _payoutMin, address _user, address _referral)
         external override returns (uint256 payout_, uint256 epochCount_, uint256 index_)
     {
         Market storage market = markets[_id];
@@ -189,7 +189,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         require(_amount > 0 && btcAmount > 0, "NoAmount1");
         
         (payout_, price) = payoutFor(_id, bondValueAmount);
-        require(price <= _maxPrice, "MaxPrice");
+        require(payout_ >= _payoutMin, "LessPayout");
 
         market.purchased += _amount;
         market.sold += payout_;

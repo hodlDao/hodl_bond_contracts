@@ -37,7 +37,7 @@ interface IBondDepository {
     function deposit(
         uint256 _id,
         uint256 _amount,
-        uint256 _maxPrice,
+        uint256 _payoutMin,
         address _user,
         address _referral
     )
