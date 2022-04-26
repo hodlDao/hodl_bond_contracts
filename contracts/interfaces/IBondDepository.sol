@@ -9,7 +9,6 @@ interface IBondDepository {
         IERC20  quoteToken; // token to accept as payment
         uint256 sold;       // base tokens out
         uint256 purchased;  // quote tokens in
-        bool    enableQuote2WBTC;
         bool    isActive;   // active for bond
     }
 
@@ -23,20 +22,17 @@ interface IBondDepository {
     // Additional info about market.
     struct Metadata {
         uint256 quoteDecimals;   // decimals of quote token
-        address bondCalculator;  // bond value calculator
     }
     
     function create(
         IERC20  _quoteToken,
-        address _bondCalculator,
         uint256 _baseVariable,
         uint256 _controlVariable,
         uint256 _vestingTerm,
         bool    _isActive
     ) external returns (uint256 id_);
     
-    function enableMarketAnd2BTC(uint256 _id, bool _enableMarket, bool _enableBTC, address _swapHelper, address _wbtc) external;
-    function updateCalculator(uint256 _id, address _bondCalculator) external;
+    function enableMarket(uint256 _id, bool _enableMarket, address _swapHelper) external;
     
     function deposit(
         uint256 _id,
@@ -70,13 +66,13 @@ interface IBondDepository {
     )
         external;
         
-    function rebase(uint256 curEpoch) external;    
-    function payoutFor(uint256 _id, uint256 _amount) external view returns (uint256 _payout, uint256 _payoutPrice, uint256 _bondValueAmount);
-    function payoutWithPrice(uint256 _id, uint256 _amount, uint256 _price) external view returns (uint256 _payout, uint256 _bondValueAmount);
-    function payoutPrice(uint256 _id, uint256 _amount) external view returns (uint256 _payoutPrice, uint256 _bondValueAmount);
-    function bondDiscount(uint256 _id, uint256 _amount) external view returns (uint256 discount, uint256 bondValueAmount);
-    function bondValue(uint256 _id, uint256 _amount) external view returns (uint256 amount);
-    function bondingValue(uint256 _id, uint256 _amount) external view returns (uint256 bondingAmount, uint256 bondValueAmount);
+    function rebase(uint256 curEpoch) external;
+    function payoutWithPrice(uint256 _amountUSDC, uint256 _price) external view returns (uint256 _payout);
+    function bondValue(uint256 _id, uint256 _amount) external view returns (uint256 amountValue, uint256 btcAmount);
+    function payoutFor(uint256 _id, uint256 _amountValue) external view returns (uint256 _payout, uint256 _payoutPrice);
+    function payoutPrice(uint256 _id, uint256 _amountValue) external view returns (uint256 _payoutPrice);
+    function bondDiscount(uint256 _id, uint256 _amountValue) external view returns (uint256 discount);
+    function bondingValue(uint256 _amountValue) external view returns (uint256 bondingValueAmount);
     function currentControlVariable(uint256 _id) external view returns (uint256);
     function liveMarkets() external view returns (uint256[] memory);
 }

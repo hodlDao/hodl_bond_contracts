@@ -174,6 +174,7 @@ contract Rebalancer is HodlAccessControlled {
         IERC20(lpAddr).safeApprove(btch2wbtcR, 0);
     }
     
+    //Used only by authorized worker to convert treasury USDC to liquidity.
     function treasury2Liquidity(uint256 amountIn, uint256 amountOutMin) public onlyWorker returns (uint256 amountWBTC, uint256 amountBTCH) 
     {
         require(amountIn > 0, "NoAmountIn");
@@ -182,6 +183,7 @@ contract Rebalancer is HodlAccessControlled {
         amountWBTC = IPriceHelper(priceHelper).getBTCUSDC24();
         require(amountWBTC > 0, "NoPrice");
         
+        //Double security check for mis-input amountOutMin.
         amountWBTC = amountIn.mul(1e8).div(amountWBTC).mul(quote2wbtcPriceAllowed).div(1e4);
         require(amountWBTC <= amountOutMin, "amountOutMinTooLow");
         
@@ -190,7 +192,7 @@ contract Rebalancer is HodlAccessControlled {
         amountBTCH = provideWBTC2Liquidity(amountWBTC);
     }
     
-    //Prepare for WBTC bonding in future.
+    //Used only by authorized worker to convert treasury WBTC to liquidity.
     function treasuryWBTC2Liquidity(uint256 amountIn) public onlyWorker returns (uint256 amountWBTC, uint256 amountBTCH) 
     {
         require(amountIn > 0, "NoAmountIn");
@@ -263,6 +265,14 @@ contract Rebalancer is HodlAccessControlled {
         }
     }
     
+    function getWBTCAmount2USDCValue(uint256 amountBTC) public view returns (uint256 amount) {
+        uint targetPrice = IPriceHelper(priceHelper).getBTCUSDC365()/10000;
+        uint BTCUSDC24 = IPriceHelper(priceHelper).getBTCUSDC24();
+        require(targetPrice > 0 && BTCUSDC24 > 0, "NoPrice");
+        
+        amount = BTCUSDC24.mul(amountBTC).div(1e8);
+    }
+    
     function getWBTC2USDCValue() public view returns (uint256 amount) {
         address lpAddr = IUniswapV2Factory(btch2wbtcF).getPair(btch, wbtc);
         uint256 liquidity = IERC20(lpAddr).balanceOf(treasury);
@@ -286,13 +296,6 @@ contract Rebalancer is HodlAccessControlled {
         
         amount = reserveWBTC.mul(liquidity).div(totalSupply);
         amount = BTCUSDC24.mul(amount).div(1e8);
-    }
-    
-    function getAllowedAmountOutMin2WBTC(address quoteToken, uint256 amountIn) public view returns (uint256 amountOutMin) {
-        require(amountIn > 0 && quoteToken == usdc, "NotAllowed");
-        
-        uint BTCUSDC24 = IPriceHelper(priceHelper).getBTCUSDC24();
-        amountOutMin = amountIn.mul(1e8).div(BTCUSDC24).mul(quote2wbtcPriceAllowed).div(1e4);
     }
     
     function upwardsAdjustBTCH2WBTC(uint256 btch2wbtcDelta, uint256 btch2wbtc) internal returns (uint256 btchDelta) {

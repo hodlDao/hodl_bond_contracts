@@ -35,14 +35,16 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         IStaking _staking, 
         ITreasury _treasury, 
         IGenesis _genesis, 
-        IPriceHelper _priceHelper
+        IPriceHelper _priceHelper,
+        address _wbtc
     ) NoteKeeper(_authority, _btch, _sBTCH, _staking, _treasury, _genesis, _priceHelper) {
         _btch.approve(address(_staking), type(uint256).max);
         IERC20(address(_sBTCH)).approve(address(_staking), type(uint256).max);
+        wbtc = _wbtc;
     }
     
     //creates a new market type
-    function create(IERC20  _quoteToken, address _bondCalculator, uint256 _baseVariable, uint256 _controlVariable, uint256 _vestingTerm, bool _isActive) 
+    function create(IERC20  _quoteToken, uint256 _baseVariable, uint256 _controlVariable, uint256 _vestingTerm, bool _isActive) 
         external override onlyGovernorPolicy returns (uint256 id_) 
     {
 
@@ -55,7 +57,6 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
                 quoteToken: _quoteToken,
                 sold: 0,
                 purchased: 0,
-                enableQuote2WBTC: true,
                 isActive: _isActive
             })
         );
@@ -70,22 +71,19 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
 
         metadata.push(
             Metadata({
-                quoteDecimals: decimals,
-                bondCalculator: _bondCalculator
+                quoteDecimals: decimals
             })
         );
 
         emit CreateMarket(id_, address(btch), address(_quoteToken), _controlVariable);
     }
     
-    function enableMarketAnd2BTC(uint256 _id, bool _enableMarket, bool _enableBTC, address _swapHelper, address _wbtc) 
+    function enableMarket(uint256 _id, bool _enableMarket, address _swapHelper) 
         external override onlyGovernorPolicy 
     {
         require(address(markets[_id].quoteToken) != address(0), "NoMarket");
         markets[_id].isActive = _enableMarket;
-        markets[_id].enableQuote2WBTC = _enableBTC;
         swapHelper = _swapHelper;
-        wbtc = _wbtc;
     }
     
     function updateBondInfo(uint256 _id, uint256 _baseVariable, uint256 _controlVariable) 
@@ -99,14 +97,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         emit BondInfoUpdated(_id, _baseVariable, _controlVariable);
     }
     
-    function updateCalculator(uint256 _id, address _bondCalculator) 
-        external override onlyGovernorPolicy 
-    {
-        require(address(markets[_id].quoteToken) != address(0), "NoMarket");
-        metadata[_id].bondCalculator = _bondCalculator;
-    }
-    
-    function rebase(uint256 curEpoch) 
+    function rebase(uint256 curEpoch)
         external override onlyStakingContract
     {
         if(bondingEpochNumber == curEpoch)
@@ -183,20 +174,21 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
             curBondingAmount += bondingAmounts[slot];
     }
     
-    //deposit quote tokens to bond from a specified market
+    //deposit quote token to bond from a specified market
     //Here _maxPrice is based on BTCH/USDC.
     function deposit(uint256 _id, uint256 _amount, uint256 _maxPrice, address _user, address _referral)
         external override returns (uint256 payout_, uint256 epochCount_, uint256 index_)
     {
         Market storage market = markets[_id];
-        Terms storage term = terms[_id];
         require(market.isActive, "MarketNotActive");
 
         staking.rebase();
         
         uint256 price;
-        uint bondValueAmount;
-        (payout_, price, bondValueAmount) = payoutFor(_id, _amount);
+        (uint256 bondValueAmount, uint256 btcAmount) = bondValue(_id, _amount);
+        require(_amount > 0 && btcAmount > 0, "NoAmount1");
+        
+        (payout_, price) = payoutFor(_id, bondValueAmount);
         require(price <= _maxPrice, "MaxPrice");
 
         market.purchased += _amount;
@@ -204,18 +196,15 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
 
         emit Bond(_id, _amount, price);
 
-        (index_, epochCount_) = addNoteForBond(_user, payout_, term.vestingTerm, uint48(_id), _referral);
+        (index_, epochCount_) = addNoteForBond(_user, payout_, terms[_id].vestingTerm, uint48(_id), _referral);
         adjustBondingAmounts(bondValueAmount, epochCount_);
         
-        if(market.enableQuote2WBTC && address(market.quoteToken) != wbtc) {
-            //Use oracle to check amount min allowed.
-            //reuse bondValueAmount for amountMinAllowed.
-            bondValueAmount = IRebalancer(rebalancer).getAllowedAmountOutMin2WBTC(address(market.quoteToken), _amount);
+        if(address(market.quoteToken) != wbtc) {
             IERC20(market.quoteToken).safeTransferFrom(msg.sender, swapHelper, _amount);
             uint oldWBTC = IERC20(wbtc).balanceOf(address(this));
-            ISwapHelper(swapHelper).swapExactTokensForTokens(address(market.quoteToken), wbtc, _amount, bondValueAmount);
+            ISwapHelper(swapHelper).swapExactTokensForTokens(address(market.quoteToken), wbtc, _amount, btcAmount);
             _amount = IERC20(wbtc).balanceOf(address(this));
-            require(_amount > oldWBTC, "NoAmount");
+            require(_amount >= oldWBTC + btcAmount, "NoAmount2");
             IERC20(wbtc).safeTransfer(address(treasury), _amount);
         }
         else {
@@ -226,7 +215,7 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
             IPriceHelper(priceHelper).update();
     }
     
-    //deposit quote tokens as genesis from a specified market
+    //deposit quote token as usdc for genesis
     function depositForGenesis(uint256 _id, uint256 _amount, uint256 _genesisLength, uint256 _bondLength, address _referral)
         external override onlyGenesisReward
     {
@@ -236,7 +225,6 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         
         staking.rebase();
         
-        //Note genesisAmount is same as bondValue for USDC.
         (uint256 genesisAmount, uint256 bondAmount, uint256 priceGenesis, uint256 priceBond) = IGenesis(genesis).getGenesisInfo();
         genesisAmount = genesisAmount.sub(bondAmount);
         
@@ -244,17 +232,16 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         market.purchased += _amount;
         
         //INDEX_GENESIS_0 + INDEX_GENESIS_1
-        (genesisPayout,) = payoutWithPrice(_id, genesisAmount, priceGenesis);
+        genesisPayout = payoutWithPrice(genesisAmount, priceGenesis);
         market.sold += genesisPayout;
         addNoteForGenesis(genesisPayout / 10, 0, _referral, INDEX_GENESIS_0);
         addNoteForGenesis(genesisPayout - genesisPayout / 10, _genesisLength, _referral, INDEX_GENESIS_1);
         
         //INDEX_GENESIS_BOND
-        //reuse genesisAmount as bondValueAmount
-        (genesisBondPayout, genesisAmount) = payoutWithPrice(_id, bondAmount, priceBond);
+        genesisBondPayout = payoutWithPrice(bondAmount, priceBond);
         market.sold += genesisBondPayout;
         addNoteForGenesis(genesisBondPayout, _bondLength, _referral, INDEX_GENESIS_BOND);
-        adjustBondingAmounts(genesisAmount, _bondLength/epochLength);
+        adjustBondingAmounts(bondAmount, _bondLength/epochLength);
 
         // transfer payment to treasury
         market.quoteToken.safeTransferFrom(msg.sender, address(treasury), _amount);
@@ -269,56 +256,58 @@ contract HodlBondDepository is IBondDepository, NoteKeeper {
         addNoteForRebalance(adjustType, stakingReward, invokerReward, invoker, _referral);
     }
     
+    //used with usdc quote token for Genesis.
+    function payoutWithPrice(uint256 _amountUSDC, uint256 _price) 
+        public pure override returns (uint256 _payout) 
+    {
+        _payout = (_amountUSDC * 1e9) / _price;
+    }
+    
+    //get usdc bond value of quoteToken as WBTC asset.
+    function bondValue(uint256 _id, uint256 _amount)
+        public view override returns (uint256 amountValue, uint256 btcAmount) 
+    {
+        address quoteToken = address(markets[_id].quoteToken);
+        btcAmount = _amount;
+        if(quoteToken != wbtc) {
+            uint[] memory amountsOut = ISwapHelper(swapHelper).getAmountsOut(quoteToken, wbtc, _amount);
+            btcAmount = amountsOut[amountsOut.length-1];
+        }
+        
+        amountValue = IRebalancer(rebalancer).getWBTCAmount2USDCValue(btcAmount);
+    }
+    
     //1e9 = BTCH decimals (9)
-    function payoutFor(uint256 _id, uint256 _amount) 
-        public view override returns (uint256 _payout, uint256 _payoutPrice, uint256 _bondValueAmount) 
+    function payoutFor(uint256 _id, uint256 _amountValue) 
+        public view override returns (uint256 _payout, uint256 _payoutPrice) 
     {
-        (_payoutPrice, _bondValueAmount) = payoutPrice(_id, _amount);
-        _payout = (_bondValueAmount * 1e9) / _payoutPrice;
+        _payoutPrice = payoutPrice(_id, _amountValue);
+        _payout = (_amountValue * 1e9) / _payoutPrice;
     }
     
-    function payoutWithPrice(uint256 _id, uint256 _amount, uint256 _price) 
-        public view override returns (uint256 _payout, uint256 _bondValueAmount) 
-    {
-        _bondValueAmount = bondValue(_id, _amount);
-        _payout = (_bondValueAmount * 1e9) / _price;
-    }
-    
-    function payoutPrice(uint256 _id, uint256 _amount) 
-        public view override returns (uint256 _payoutPrice, uint256 _bondValueAmount) 
+    //used with usdc _amountValue against quoteToken.
+    function payoutPrice(uint256 _id, uint256 _amountValue)
+        public view override returns (uint256 _payoutPrice) 
     {
         _payoutPrice = IPriceHelper(priceHelper).getBTCUSDC365()/10000;
-        (uint256 discount, uint256 bondValueAmount) = bondDiscount(_id, _amount);
-        _bondValueAmount = bondValueAmount;
+        uint256 discount = bondDiscount(_id, _amountValue);
         _payoutPrice = _payoutPrice * discount / 10000;
     }
     
-    function bondDiscount(uint256 _id, uint256 _amount) 
-        public view override returns (uint256 discount, uint256 bondValueAmount) 
+    //used with usdc _amountValue against quoteToken.
+    function bondDiscount(uint256 _id, uint256 _amountValue) 
+        public view override returns (uint256 discount) 
     {
-        //reuse discount as bondingAmount.
-        (discount, bondValueAmount) = bondingValue(_id, _amount);
+        uint256 bondingValueAmount = bondingValue(_amountValue);
         uint256 controlVariable = currentControlVariable(_id);
-        discount = discount*controlVariable/treasury.hodlValue()+terms[_id].baseVariable;
+        discount = bondingValueAmount*controlVariable/treasury.hodlValue()+terms[_id].baseVariable;
     }
     
-    function bondValue(uint256 _id, uint256 _amount) 
-        public view override returns (uint256 amount) 
+    //used with usdc _amountValue against quoteToken.
+    function bondingValue(uint256 _amountValue) 
+        public view override returns (uint256 bondingValueAmount) 
     {
-        if(_id == 0) {
-            amount  = _amount;
-            return amount;
-        }
-        
-        require(metadata[_id].bondCalculator != address(0), "NoCalculator");
-        amount = IBondCalculator(metadata[_id].bondCalculator).valuation(address(markets[_id].quoteToken), metadata[_id].quoteDecimals, _amount);
-    }
-    
-    function bondingValue(uint256 _id, uint256 _amount) 
-        public view override returns (uint256 bondingAmount, uint256 bondValueAmount) 
-    {
-        bondValueAmount = bondValue(_id, _amount);
-        bondingAmount = getBondingAmount(bondValueAmount/2);
+        bondingValueAmount = getBondingAmount(_amountValue/2);
     }
  
     function currentControlVariable(uint256 _id) 

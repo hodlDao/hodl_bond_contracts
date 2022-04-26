@@ -265,8 +265,6 @@ abstract contract NoteKeeper is INoteKeeper, FrontEndRewarder {
         _payout += pendingForGenesis0123(genesisAmount, userGenesisAmount, INDEX_GENESIS_1, _user);
         _payout += pendingForGenesis0123(bondAmount, userBondAmount, INDEX_GENESIS_BOND, _user);
         _payout += pendingForGenesis0123(genesisAmount, userGenesisAmount, INDEX_GENESIS_REWARD, _user);
-        
-        _payout = sBTCH.balanceForGons(_payout);
     }
     
     function pendingForGenesis0123(uint256 _totalAmount, uint256 _userAmount, uint256 _type, address _user)
