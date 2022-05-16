@@ -21,7 +21,7 @@ contract MockERC20 is ERC20 {
         admin = msg.sender;
     }
 
-    function mint(address to, uint256 value) public onlyOwner {
+    function mint(address to, uint256 value) public {
         _mint(to, value);
     }
 
